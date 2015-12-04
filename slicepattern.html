@@ -44,6 +44,8 @@ cache_hashes['haswell'] = {
  * Practical Timing Side Channel Attacks Against Kernel Space ASLR.
  *
  * Ralf Hund, Carsten Willems, and Thorsten Holz
+ *
+ * (only the bits more significant than than cache-set bits)
  */
 cache_hashes["sandy"] = {
         2: [ 0x017d5800, /* 0b01011111010101100000000000000000 */
@@ -293,6 +295,12 @@ window.onload = init;
 <p>
 <canvas id="visual" width="512" height="512">
 </canvas>
+</p>
+<p>hash functions from:
+<ul>
+<li><a href="http://www.s3.eurecom.fr/docs/raid15_maurice.pdf">Reverse Engineering Intel Last-Level Cache Complex Addressing Using Performance Counters</a></li>
+<li><a href="http://www.ieee-security.org/TC/SP2013/papers/4977a191.pdf">Practical Timing Side Channel Attacks Against Kernel Space ASLR</a></li>
+</ul>
 </p>
 </body>
 </html>
