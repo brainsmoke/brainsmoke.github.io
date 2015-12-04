@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html>
+<title>Intel L3-cache slice partitioning visualisation</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta http-equiv="Cache-Control" content="no-cache" />
+<script type="text/javascript">
+
+function parity(bits)
+{
+	bits ^= bits >> 1;
+	bits ^= bits >> 2;
+	bits ^= bits >> 4;
+	bits ^= bits >> 8;
+	bits ^= bits >> 16;
+
+	return bits&1;
+}
+
+/* everything shifted 6 bits to the left, because JavaScript cannot do math */
+
+var cache_hashes = new Array();
+
+/* hash function from:
+ *
+ * Reverse Engineering Intel Last-Level Cache Complex Addressing Using Performance Counters.
+ *
+ * Clementine Maurice, Nicolas Le Scouarnec, Christoph Neumann, Olivier Heen, and Aurelien Francillon
+ *
+ */
+cache_hashes['haswell'] = {
+
+// o0 0b01101101011111010101110101010001000000
+// o1 0b10111010110101111110101010100010000000
+// o2 0b11110011001100110010010011000100000000
+
+	2: [ 0x6d7d5d51, 0x00000000, 0x00000000 ],
+	4: [ 0x6d7d5d51, 0xbad7eaa2, 0x00000000 ],
+	8: [ 0x6d7d5d51, 0xbad7eaa2, 0xf33324c4 ],
+
+};
+
+/* hash function from:
+ *
+ * Practical Timing Side Channel Attacks Against Kernel Space ASLR.
+ *
+ * Ralf Hund, Carsten Willems, and Thorsten Holz
+ */
+cache_hashes["sandy"] = {
+        2: [ 0x017d5800, /* 0b01011111010101100000000000000000 */
+             0,
+             0,
+        ],
+        4: [
+            0x017d5800, /* 0b01011111010101100000000000000000 */
+            0x02d7e800, /* 0b10110101111110100000000000000000 */
+            0,
+        ],
+		8: [ 0,0,0 ], /* ??? */
+};
+
+function get_slice(addr, arch, n_cores)
+{
+	var line_addr = (addr-(addr&63))/64;
+	var p;
+
+	var h = cache_hashes[arch][n_cores];
+	p = parity(line_addr & h[0]);
+	p |= 2*parity(line_addr & h[1]);
+	p |= 4*parity(line_addr & h[2]);
+
+	return p;
+}
+
+function get_set(addr)
+{
+	return (addr>>6)&0x7ff;
+}
+
+var colors = [ [0,0,0], [255,255,255], [255,0,0], [0,255,0], [0,0,255] ];
+
+function update()
+{
+	var offscreen = document.createElement('canvas');
+	var w = 128, h = 128;
+	var ctx = offscreen.getContext("2d");
+	var img = ctx.createImageData(w, h);
+	var addr = parseInt(document.getElementById('addr').value, 16)&~0x3f;
+	var n_cores = parseInt(document.getElementById('cores').value)|0;
+	var xgran = parseInt(document.getElementById('xgran').value)|0;
+	var ygran = parseInt(document.getElementById('ygran').value)|0;
+	var arch = document.getElementById('arch').value;
+
+	var slice_colors = new Array(8);
+	for (var i=0; i<8; i++)
+	{
+		slice_colors[i] = colors[parseInt(document.getElementById('slice'+i.toString()).value)];
+	}
+
+	for (var y=0; y<h; y++)
+	for (var x=0; x<w; x++)
+	{
+		var a = addr+(x*xgran)+y*ygran;
+
+		var slice = get_slice(a, arch, n_cores);
+
+		var i = w*y+x;
+		img.data[i*4+0] = slice_colors[slice][0];
+		img.data[i*4+1] = slice_colors[slice][1];
+		img.data[i*4+2] = slice_colors[slice][2];
+		img.data[i*4+3] = 255;
+	}
+	ctx.imageSmoothingEnabled = false;
+	ctx.mozImageSmoothingEnabled = false;
+	ctx.putImageData(img, 0, 0);
+	document.getElementById('visual').getContext("2d").drawImage(ctx.canvas, 0, 0);
+}
+
+function set_control(e, min, max)
+{
+	e.onkeydown = function (e)
+	{
+		var v = parseInt(this.value, 16);
+		switch (e.keyCode)
+		{
+			case 37:
+				v -= parseInt(document.getElementById('xgran').value)|0;
+				break;
+			case 38:
+				v -= parseInt(document.getElementById('ygran').value)|0;
+				break;
+			case 39:
+				v += parseInt(document.getElementById('xgran').value)|0;
+				break;
+			case 40:
+				v += parseInt(document.getElementById('ygran').value)|0;
+				break;
+		}
+		if (v != parseInt(this.value))
+		{
+			this.value = (min + ( (v+max-min) % (max-min))).toString(16);
+			this.onchange();
+		}
+	}
+}
+
+function init()
+{
+	var e;
+
+	e = document.getElementById('addr');
+	set_control(e, 0, 0x100000000);
+	e.onchange = function () { update(); }
+
+	var elems = ['cores', 'xgran', 'ygran', 'arch'];
+
+	for (var i=0; i<elems.length; i++)
+	{
+		e = document.getElementById(elems[i]);
+		e.onchange = e.onkeydown = e.onkeyup = function () { update(); }
+	}
+
+	for (var i=0; i<8; i++)
+	{
+		e = document.getElementById('slice'+i.toString())
+		e.onchange = function () { update(); }
+		e.onkeydown = function () { update(); }
+		e.onkeyup = function () { update(); }
+	}
+
+	var ctx = document.getElementById('visual').getContext("2d");
+	ctx.imageSmoothingEnabled = false;
+	ctx.mozImageSmoothingEnabled = false;
+	ctx.msImageSmoothingEnabled = false;
+	ctx.scale(4, 4);
+
+	update();
+}
+
+window.onload = init;
+
+</script>
+
+<body>
+<h3>Intel L3-cache slice partitioning visualisation</h3>
+<p><strong>physical addr </strong><input id='addr' type="text" value="0"></p>
+<p>
+<strong>architecture</strong>
+<select id="arch">
+	<option value="sandy">Sandy Bridge</option>
+	<option value="haswell" selected>Haswell</option>
+</select>
+<strong>#cores</strong><select id="cores">
+    <option value="2">2</option>
+    <option value="4">4</option>
+    <option value="8" selected>8</option>
+</select>
+<strong>'x delta'</strong><select id="xgran">
+    <option value="64" selected>0x40 (cache line)</option>
+    <option value="128">0x80</option>
+    <option value="256">0x100</option>
+    <option value="512">0x200</option>
+    <option value="1024">0x400</option>
+    <option value="2048">0x800</option>
+    <option value="4096">0x1000 (page)</option>
+    <option value="8192">0x2000</option>
+    <option value="16384">0x4000</option>
+    <option value="32768">0x8000</option>
+    <option value="65536">0x10000</option>
+    <option value="131072">0x20000 (cache set)</option>
+</select>
+<strong>'y delta'</strong><select id="ygran">
+    <option value="4096">0x1000 (page)</option>
+    <option value="8192">0x2000</option>
+    <option value="16384">0x4000</option>
+    <option value="32768">0x8000</option>
+    <option value="65536">0x10000</option>
+    <option value="131072">0x20000 (cache set)</option>
+    <option value="262144" selected>0x40000</option>
+    <option value="524288">0x80000</option>
+    <option value="1048576">0x100000</option>
+    <option value="2097152">0x200000</option>
+    <option value="4194304">0x400000</option>
+    <option value="8388608">0x800000</option>
+</select>
+</p>
+<p>
+<strong>slices:</strong>
+<strong>0</strong>
+<select id="slice0">
+<option style="background-color: rgb(0,0,0)" value="0">black</option>
+<option style="background-color: rgb(255, 255, 255)" value="1">white</option>
+<option style="background-color: rgb(255,0,0)" value="2">red</option>
+<option style="background-color: rgb(0,255,0)" value="3" selected>green</option>
+<option style="background-color: rgb(0,0,255)" value="4">blue</option>
+</select>
+<strong>1</strong>
+<select id="slice1">
+<option style="background-color: rgb(0,0,0)" value="0">black</option>
+<option style="background-color: rgb(255, 255, 255)" value="1">white</option>
+<option style="background-color: rgb(255,0,0)" value="2">red</option>
+<option style="background-color: rgb(0,255,0)" value="3">green</option>
+<option style="background-color: rgb(0,0,255)" value="4">blue</option>
+</select>
+<strong>2</strong>
+<select id="slice2">
+<option style="background-color: rgb(0,0,0)" value="0">black</option>
+<option style="background-color: rgb(255, 255, 255)" value="1">white</option>
+<option style="background-color: rgb(255,0,0)" value="2">red</option>
+<option style="background-color: rgb(0,255,0)" value="3">green</option>
+<option style="background-color: rgb(0,0,255)" value="4">blue</option>
+</select>
+<strong>3</strong>
+<select id="slice3">
+<option style="background-color: rgb(0,0,0)" value="0">black</option>
+<option style="background-color: rgb(255, 255, 255)" value="1">white</option>
+<option style="background-color: rgb(255,0,0)" value="2">red</option>
+<option style="background-color: rgb(0,255,0)" value="3">green</option>
+<option style="background-color: rgb(0,0,255)" value="4">blue</option>
+</select>
+<strong>4</strong>
+<select id="slice4">
+<option style="background-color: rgb(0,0,0)" value="0">black</option>
+<option style="background-color: rgb(255, 255, 255)" value="1">white</option>
+<option style="background-color: rgb(255,0,0)" value="2">red</option>
+<option style="background-color: rgb(0,255,0)" value="3">green</option>
+<option style="background-color: rgb(0,0,255)" value="4">blue</option>
+</select>
+<strong>5</strong>
+<select id="slice5">
+<option style="background-color: rgb(0,0,0)" value="0">black</option>
+<option style="background-color: rgb(255, 255, 255)" value="1">white</option>
+<option style="background-color: rgb(255,0,0)" value="2">red</option>
+<option style="background-color: rgb(0,255,0)" value="3">green</option>
+<option style="background-color: rgb(0,0,255)" value="4">blue</option>
+</select>
+<strong>6</strong>
+<select id="slice6">
+<option style="background-color: rgb(0,0,0)" value="0">black</option>
+<option style="background-color: rgb(255, 255, 255)" value="1">white</option>
+<option style="background-color: rgb(255,0,0)" value="2">red</option>
+<option style="background-color: rgb(0,255,0)" value="3">green</option>
+<option style="background-color: rgb(0,0,255)" value="4">blue</option>
+</select>
+<strong>7</strong>
+<select id="slice7">
+<option style="background-color: rgb(0,0,0)" value="0">black</option>
+<option style="background-color: rgb(255, 255, 255)" value="1" selected>white</option>
+<option style="background-color: rgb(255,0,0)" value="2">red</option>
+<option style="background-color: rgb(0,255,0)" value="3">green</option>
+<option style="background-color: rgb(0,0,255)" value="4">blue</option>
+</select>
+</p>
+<p>
+<canvas id="visual" width="512" height="512">
+</canvas>
+</p>
+</body>
+</html>
+
